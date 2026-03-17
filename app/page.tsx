@@ -167,7 +167,7 @@ function AuthPage() {
 
 // ─── Todo App ────────────────────────────────────────────────────────────────
 
-function TodoApp({ onLogout, userEmail }: { onLogout: () => void; userEmail: string }) {
+function TodoApp({ onLogout, userEmail, userId }: { onLogout: () => void; userEmail: string; userId: string }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [input, setInput] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -177,6 +177,19 @@ function TodoApp({ onLogout, userEmail }: { onLogout: () => void; userEmail: str
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  // ─── Load tasks from Supabase ──────────────────────────────────────────
+  useEffect(() => {
+    supabase
+      .from("tasks")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .then(({ data }) => {
+        if (data) {
+          setTasks(data.map((r) => ({ id: r.id, text: r.text, completed: r.completed, createdAt: r.created_at })));
+        }
+      });
+  }, []);
 
   // ─── Derived ─────────────────────────────────────────────────────────────
 
@@ -236,23 +249,25 @@ function TodoApp({ onLogout, userEmail }: { onLogout: () => void; userEmail: str
 
   // ─── Handlers ────────────────────────────────────────────────────────────
 
-  function addTask() {
+  async function addTask() {
     if (!input.trim()) return;
-    setTasks((prev) => [
-      { id: Date.now(), text: input.trim(), completed: false, createdAt: Date.now() },
-      ...prev,
-    ]);
+    const newTask: Task = { id: Date.now(), text: input.trim(), completed: false, createdAt: Date.now() };
+    setTasks((prev) => [newTask, ...prev]);
     setInput("");
+    const { error } = await supabase.from("tasks").insert({ id: newTask.id, user_id: userId, text: newTask.text, completed: false, created_at: newTask.createdAt });
+    if (error) console.error("Insert task error:", error);
   }
 
-  function toggleTask(id: number) {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t))
-    );
+  async function toggleTask(id: number) {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t)));
+    await supabase.from("tasks").update({ completed: !task.completed }).eq("id", id);
   }
 
-  function deleteTask(id: number) {
+  async function deleteTask(id: number) {
     setTasks((prev) => prev.filter((t) => t.id !== id));
+    await supabase.from("tasks").delete().eq("id", id);
   }
 
   function prevMonth() {
@@ -654,7 +669,11 @@ function TodoApp({ onLogout, userEmail }: { onLogout: () => void; userEmail: str
                 </span>
                 {completedCount > 0 && (
                   <button
-                    onClick={() => setTasks((prev) => prev.filter((t) => !t.completed))}
+                    onClick={async () => {
+                      const completedIds = tasks.filter((t) => t.completed).map((t) => t.id);
+                      setTasks((prev) => prev.filter((t) => !t.completed));
+                      await supabase.from("tasks").delete().in("id", completedIds);
+                    }}
                     className="text-[11px] text-gray-400 hover:text-gray-900 transition shrink-0 font-medium"
                   >
                     Clear
@@ -702,6 +721,7 @@ export default function Home() {
 
   return (
     <TodoApp
+      userId={session.user.id}
       userEmail={session.user.email ?? ""}
       onLogout={async () => { await supabase.auth.signOut(); }}
     />
