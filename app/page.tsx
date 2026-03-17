@@ -8,7 +8,6 @@ import type { Session } from "@supabase/supabase-js";
 
 type Filter = "all" | "active" | "completed";
 type View = "list" | "calendar";
-type AuthMode = "login" | "signup";
 
 interface Task {
   id: number;
@@ -60,43 +59,35 @@ function getTimeAgo(timestamp: number): string {
 
 // ─── Auth Page ───────────────────────────────────────────────────────────────
 
-function AuthPage({ onAuth }: { onAuth: () => void }) {
-  const [mode, setMode] = useState<AuthMode>("login");
+function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [linkLoading, setLinkLoading] = useState(false);
-  const [message, setMessage] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState<"login" | "signup" | null>(null);
   const [error, setError] = useState("");
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
+  async function handleLogin() {
+    if (!email || !password) { setError("Enter email and password"); return; }
+    setLoading("login");
     setError("");
-    setMessage("");
-
-    if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) setError(error.message);
-      else setMessage("Check your email to confirm your account!");
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setError(error.message);
-      else onAuth();
-    }
-
-    setLoading(false);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setError(error.message);
+    setLoading(null);
   }
 
-  async function sendLoginLink() {
-    if (!email) { setError("Enter your email first"); return; }
-    setLinkLoading(true);
+  async function handleSignup() {
+    if (!email || !password) { setError("Enter email and password"); return; }
+    if (password.length < 6) { setError("Password must be at least 6 characters"); return; }
+    setLoading("signup");
     setError("");
-    setMessage("");
-    const { error } = await supabase.auth.signInWithOtp({ email });
+    const { error } = await supabase.auth.signUp({ email, password });
     if (error) setError(error.message);
-    else setMessage("Login link sent! Check your email.");
-    setLinkLoading(false);
+    setLoading(null);
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    handleLogin();
   }
 
   return (
@@ -105,28 +96,9 @@ function AuthPage({ onAuth }: { onAuth: () => void }) {
         <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-6 text-center">
             <h1 className="text-xl font-bold text-gray-900 mb-1">Ashley ToDoList</h1>
-            <p className="text-gray-400 text-xs mb-6">
-              {mode === "login" ? "Sign in to your account" : "Create a new account"}
-            </p>
+            <p className="text-gray-400 text-xs mb-6">Sign in or create an account</p>
 
-            {/* Mode tabs */}
-            <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5 mb-5">
-              {(["login", "signup"] as AuthMode[]).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => { setMode(m); setError(""); setMessage(""); }}
-                  className={`flex-1 py-1.5 text-[11px] font-semibold rounded-lg transition-all ${
-                    mode === m
-                      ? "bg-gray-900 text-white shadow-sm"
-                      : "text-gray-400 hover:text-gray-600"
-                  }`}
-                >
-                  {m === "login" ? "Login" : "Sign Up"}
-                </button>
-              ))}
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-3">
+            <form onSubmit={onSubmit} className="space-y-3">
               <input
                 type="email"
                 value={email}
@@ -135,45 +107,56 @@ function AuthPage({ onAuth }: { onAuth: () => void }) {
                 required
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400 transition text-center"
               />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password"
-                required
-                minLength={6}
-                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400 transition text-center"
-              />
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white text-sm font-semibold py-3 rounded-xl transition-all active:scale-[0.98]"
-              >
-                {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
-              </button>
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password"
+                  required
+                  minLength={6}
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 pr-10 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400 transition text-center"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition"
+                >
+                  {showPassword ? (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12c1.292 4.338 5.31 7.5 10.066 7.5.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+
+              {/* Login & Sign Up buttons */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="submit"
+                  disabled={loading !== null}
+                  className="flex-1 bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white text-sm font-semibold py-3 rounded-xl transition-all active:scale-[0.98]"
+                >
+                  {loading === "login" ? "Signing in..." : "Login"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignup}
+                  disabled={loading !== null}
+                  className="flex-1 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-sm font-semibold py-3 rounded-xl transition-all active:scale-[0.98]"
+                >
+                  {loading === "signup" ? "Creating..." : "Sign Up"}
+                </button>
+              </div>
             </form>
-
-            {/* Divider */}
-            <div className="flex items-center gap-3 my-4">
-              <div className="flex-1 h-px bg-gray-100" />
-              <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">or</span>
-              <div className="flex-1 h-px bg-gray-100" />
-            </div>
-
-            {/* Send login link */}
-            <button
-              onClick={sendLoginLink}
-              disabled={linkLoading}
-              className="w-full border border-gray-200 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-sm font-semibold py-3 rounded-xl transition-all active:scale-[0.98]"
-            >
-              {linkLoading ? "Sending..." : "Send me a Login Link"}
-            </button>
 
             {error && (
               <p className="mt-4 text-xs text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5">{error}</p>
-            )}
-            {message && (
-              <p className="mt-4 text-xs text-green-600 bg-green-50 border border-green-100 rounded-xl px-4 py-2.5">{message}</p>
             )}
           </div>
         </div>
@@ -714,7 +697,7 @@ export default function Home() {
   }
 
   if (!session) {
-    return <AuthPage onAuth={() => {}} />;
+    return <AuthPage />;
   }
 
   return (
