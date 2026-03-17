@@ -1,11 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
+import type { Session } from "@supabase/supabase-js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type Filter = "all" | "active" | "completed";
 type View = "list" | "calendar";
+type AuthMode = "login" | "signup";
 
 interface Task {
   id: number;
@@ -55,9 +58,133 @@ function getTimeAgo(timestamp: number): string {
   return `${days}d ago`;
 }
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Auth Page ───────────────────────────────────────────────────────────────
 
-export default function Home() {
+function AuthPage({ onAuth }: { onAuth: () => void }) {
+  const [mode, setMode] = useState<AuthMode>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    setMessage("");
+
+    if (mode === "signup") {
+      const { error } = await supabase.auth.signUp({ email, password });
+      if (error) setError(error.message);
+      else setMessage("Check your email to confirm your account!");
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setError(error.message);
+      else onAuth();
+    }
+
+    setLoading(false);
+  }
+
+  async function sendLoginLink() {
+    if (!email) { setError("Enter your email first"); return; }
+    setLinkLoading(true);
+    setError("");
+    setMessage("");
+    const { error } = await supabase.auth.signInWithOtp({ email });
+    if (error) setError(error.message);
+    else setMessage("Login link sent! Check your email.");
+    setLinkLoading(false);
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 selection:bg-gray-200">
+      <div className="w-full max-w-sm">
+        <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-6 text-center">
+            <h1 className="text-xl font-bold text-gray-900 mb-1">Ashley ToDoList</h1>
+            <p className="text-gray-400 text-xs mb-6">
+              {mode === "login" ? "Sign in to your account" : "Create a new account"}
+            </p>
+
+            {/* Mode tabs */}
+            <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5 mb-5">
+              {(["login", "signup"] as AuthMode[]).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => { setMode(m); setError(""); setMessage(""); }}
+                  className={`flex-1 py-1.5 text-[11px] font-semibold rounded-lg transition-all ${
+                    mode === m
+                      ? "bg-gray-900 text-white shadow-sm"
+                      : "text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  {m === "login" ? "Login" : "Sign Up"}
+                </button>
+              ))}
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email address"
+                required
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400 transition text-center"
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                required
+                minLength={6}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400 transition text-center"
+              />
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full bg-gray-900 hover:bg-gray-800 disabled:opacity-50 text-white text-sm font-semibold py-3 rounded-xl transition-all active:scale-[0.98]"
+              >
+                {loading ? "Please wait..." : mode === "login" ? "Sign In" : "Create Account"}
+              </button>
+            </form>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3 my-4">
+              <div className="flex-1 h-px bg-gray-100" />
+              <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">or</span>
+              <div className="flex-1 h-px bg-gray-100" />
+            </div>
+
+            {/* Send login link */}
+            <button
+              onClick={sendLoginLink}
+              disabled={linkLoading}
+              className="w-full border border-gray-200 hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50 text-gray-700 text-sm font-semibold py-3 rounded-xl transition-all active:scale-[0.98]"
+            >
+              {linkLoading ? "Sending..." : "Send me a Login Link"}
+            </button>
+
+            {error && (
+              <p className="mt-4 text-xs text-red-500 bg-red-50 border border-red-100 rounded-xl px-4 py-2.5">{error}</p>
+            )}
+            {message && (
+              <p className="mt-4 text-xs text-green-600 bg-green-50 border border-green-100 rounded-xl px-4 py-2.5">{message}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Todo App ────────────────────────────────────────────────────────────────
+
+function TodoApp({ onLogout, userEmail }: { onLogout: () => void; userEmail: string }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [input, setInput] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -164,33 +291,38 @@ export default function Home() {
 
   const todayKey = toDateKey(Date.now());
   const todayDate = new Date();
-  const greeting =
-    todayDate.getHours() < 12 ? "Good Morning" : todayDate.getHours() < 18 ? "Good Afternoon" : "Good Evening";
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-[#f4f6f9] flex items-center justify-center p-4 selection:bg-slate-300">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 selection:bg-gray-200">
 
       {/* ── Outer Shell ───────────────────────────────────────────────────── */}
       <div className="relative w-full max-w-lg">
 
-        {/* ── Top Bento: Greeting + Stats ─────────────────────────────────── */}
+        {/* ── Top Bento: Title + Progress ─────────────────────────────────── */}
         <div className="grid grid-cols-3 gap-3 mb-3">
-          {/* Greeting card */}
-          <div className="col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-            <p className="text-slate-400 text-xs font-medium uppercase tracking-widest mb-1">{greeting}</p>
-            <h1 className="text-xl font-bold text-slate-800 leading-tight">Ashley ToDoList</h1>
-            <p className="text-slate-400 text-xs mt-2">
-              {DAYS[todayDate.getDay()]}, {MONTHS[todayDate.getMonth()]} {todayDate.getDate()}, {todayDate.getFullYear()}
+          {/* Title card */}
+          <div className="col-span-2 bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h1 className="text-xl font-bold text-gray-900 leading-tight">Ashley ToDoList</h1>
+              <button
+                onClick={onLogout}
+                className="text-[11px] text-gray-400 hover:text-gray-900 font-medium transition px-2 py-1 rounded-lg hover:bg-gray-100"
+              >
+                Logout
+              </button>
+            </div>
+            <p className="text-gray-400 text-xs mt-2 truncate">
+              {userEmail} &middot; {DAYS[todayDate.getDay()]}, {MONTHS[todayDate.getMonth()]} {todayDate.getDate()}
             </p>
           </div>
 
           {/* Progress ring card */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
+          <div className="bg-white border border-gray-200 rounded-2xl p-4 flex flex-col items-center justify-center shadow-sm">
             <div className="relative w-14 h-14">
               <svg className="w-14 h-14 -rotate-90" viewBox="0 0 56 56">
-                <circle cx="28" cy="28" r="24" fill="none" stroke="#f1f5f9" strokeWidth="4" />
+                <circle cx="28" cy="28" r="24" fill="none" stroke="#f3f4f6" strokeWidth="4" />
                 <circle
                   cx="28" cy="28" r="24" fill="none"
                   stroke="url(#progressGrad)" strokeWidth="4" strokeLinecap="round"
@@ -199,37 +331,37 @@ export default function Home() {
                 />
                 <defs>
                   <linearGradient id="progressGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                    <stop offset="0%" stopColor="#1e293b" />
-                    <stop offset="100%" stopColor="#475569" />
+                    <stop offset="0%" stopColor="#111827" />
+                    <stop offset="100%" stopColor="#4b5563" />
                   </linearGradient>
                 </defs>
               </svg>
-              <span className="absolute inset-0 flex items-center justify-center text-slate-700 text-xs font-bold">
+              <span className="absolute inset-0 flex items-center justify-center text-gray-800 text-xs font-bold">
                 {progress}%
               </span>
             </div>
-            <p className="text-slate-400 text-[10px] mt-1.5 font-medium">Progress</p>
+            <p className="text-gray-400 text-[10px] mt-1.5 font-medium">Progress</p>
           </div>
         </div>
 
         {/* ── Stat Pills ──────────────────────────────────────────────────── */}
         <div className="grid grid-cols-3 gap-3 mb-3">
-          <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 text-center shadow-sm">
-            <p className="text-2xl font-bold text-slate-800">{tasks.length}</p>
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider mt-0.5 font-medium">Total</p>
+          <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-center shadow-sm">
+            <p className="text-2xl font-bold text-gray-900">{tasks.length}</p>
+            <p className="text-[10px] text-gray-400 uppercase tracking-wider mt-0.5 font-medium">Total</p>
           </div>
-          <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 text-center shadow-sm">
-            <p className="text-2xl font-bold text-amber-600">{activeCount}</p>
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider mt-0.5 font-medium">Pending</p>
+          <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-center shadow-sm">
+            <p className="text-2xl font-bold text-gray-900">{activeCount}</p>
+            <p className="text-[10px] text-gray-400 uppercase tracking-wider mt-0.5 font-medium">Pending</p>
           </div>
-          <div className="bg-white border border-slate-200 rounded-2xl px-4 py-3 text-center shadow-sm">
-            <p className="text-2xl font-bold text-emerald-600">{completedCount}</p>
-            <p className="text-[10px] text-slate-400 uppercase tracking-wider mt-0.5 font-medium">Done</p>
+          <div className="bg-white border border-gray-200 rounded-2xl px-4 py-3 text-center shadow-sm">
+            <p className="text-2xl font-bold text-gray-900">{completedCount}</p>
+            <p className="text-[10px] text-gray-400 uppercase tracking-wider mt-0.5 font-medium">Done</p>
           </div>
         </div>
 
         {/* ── Main Card ───────────────────────────────────────────────────── */}
-        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
+        <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
 
           {/* Input + Controls */}
           <div className="p-4">
@@ -241,12 +373,12 @@ export default function Home() {
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addTask()}
                 placeholder="Add a new task..."
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-slate-300 transition"
+                className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400 transition"
               />
               <button
                 onClick={addTask}
                 disabled={!input.trim()}
-                className="bg-slate-800 hover:bg-slate-700 disabled:opacity-25 text-white text-sm font-semibold px-5 rounded-xl transition-all active:scale-95"
+                className="bg-gray-900 hover:bg-gray-800 disabled:opacity-20 text-white text-sm font-semibold px-5 rounded-xl transition-all active:scale-95"
               >
                 Add
               </button>
@@ -255,15 +387,15 @@ export default function Home() {
             {/* View toggle + filter row */}
             <div className="flex gap-2">
               {/* View tabs */}
-              <div className="flex bg-slate-100 rounded-xl p-1 gap-0.5">
+              <div className="flex bg-gray-100 rounded-xl p-1 gap-0.5">
                 {(["list", "calendar"] as View[]).map((v) => (
                   <button
                     key={v}
                     onClick={() => setView(v)}
                     className={`px-3 py-1.5 text-[11px] font-semibold rounded-lg transition-all ${
                       view === v
-                        ? "bg-slate-800 text-white shadow-sm"
-                        : "text-slate-400 hover:text-slate-600"
+                        ? "bg-gray-900 text-white shadow-sm"
+                        : "text-gray-400 hover:text-gray-600"
                     }`}
                   >
                     {v === "list" ? "List" : "Calendar"}
@@ -272,15 +404,15 @@ export default function Home() {
               </div>
 
               {/* Filters */}
-              <div className="flex-1 flex bg-slate-100 rounded-xl p-1 gap-0.5">
+              <div className="flex-1 flex bg-gray-100 rounded-xl p-1 gap-0.5">
                 {(["all", "active", "completed"] as Filter[]).map((f) => (
                   <button
                     key={f}
                     onClick={() => setFilter(f)}
                     className={`flex-1 py-1.5 text-[11px] font-semibold rounded-lg transition-all ${
                       filter === f
-                        ? "bg-white text-slate-800 shadow-sm"
-                        : "text-slate-400 hover:text-slate-600"
+                        ? "bg-white text-gray-900 shadow-sm"
+                        : "text-gray-400 hover:text-gray-600"
                     }`}
                   >
                     {f === "all" ? "All" : f === "active" ? "Active" : "Done"}
@@ -291,26 +423,26 @@ export default function Home() {
           </div>
 
           {/* Divider */}
-          <div className="h-px bg-slate-100" />
+          <div className="h-px bg-gray-100" />
 
           {/* ── LIST VIEW ─────────────────────────────────────────────── */}
           {view === "list" && (
             <div className="max-h-[340px] overflow-y-auto">
               {filteredTasks.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-                  <div className="w-16 h-16 rounded-2xl bg-slate-50 border border-slate-200 flex items-center justify-center mb-4">
-                    <svg className="w-7 h-7 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <div className="w-16 h-16 rounded-2xl bg-gray-50 border border-gray-200 flex items-center justify-center mb-4">
+                    <svg className="w-7 h-7 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
                     </svg>
                   </div>
-                  <p className="text-slate-500 font-semibold text-sm">
+                  <p className="text-gray-500 font-semibold text-sm">
                     {filter === "completed"
                       ? "No completed tasks yet"
                       : filter === "active"
                       ? "All caught up!"
                       : "No tasks yet"}
                   </p>
-                  <p className="text-slate-400 text-xs mt-1 max-w-[220px]">
+                  <p className="text-gray-400 text-xs mt-1 max-w-[220px]">
                     {filter === "all"
                       ? "Type above and hit Enter to add your first task"
                       : "Switch filters to see other tasks"}
@@ -322,12 +454,12 @@ export default function Home() {
                     <div key={dateKey} className="mb-1">
                       {/* Day header */}
                       <div className="flex items-center gap-3 px-3 py-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-slate-800" />
-                        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                        <div className="w-1.5 h-1.5 rounded-full bg-gray-900" />
+                        <span className="text-[11px] font-bold text-gray-500 uppercase tracking-widest">
                           {formatDateLabel(dateKey)}
                         </span>
-                        <div className="flex-1 h-px bg-slate-100" />
-                        <span className="text-[10px] text-slate-400 tabular-nums font-medium">
+                        <div className="flex-1 h-px bg-gray-100" />
+                        <span className="text-[10px] text-gray-400 tabular-nums font-medium">
                           {tasksByDate[dateKey].length}
                         </span>
                       </div>
@@ -336,8 +468,8 @@ export default function Home() {
                       {tasksByDate[dateKey].map((task) => (
                         <div
                           key={task.id}
-                          className={`group flex items-center gap-3 mx-1 px-3 py-3 rounded-xl transition-all duration-200 hover:bg-slate-50 border border-transparent hover:border-slate-100 ${
-                            task.completed ? "opacity-50" : ""
+                          className={`group flex items-center gap-3 mx-1 px-3 py-3 rounded-xl transition-all duration-200 hover:bg-gray-50 border border-transparent hover:border-gray-100 ${
+                            task.completed ? "opacity-40" : ""
                           }`}
                         >
                           {/* Checkbox */}
@@ -345,8 +477,8 @@ export default function Home() {
                             onClick={() => toggleTask(task.id)}
                             className={`w-[18px] h-[18px] rounded-md border-2 flex items-center justify-center shrink-0 transition-all duration-200 ${
                               task.completed
-                                ? "bg-slate-800 border-slate-800"
-                                : "border-slate-300 hover:border-slate-500"
+                                ? "bg-gray-900 border-gray-900"
+                                : "border-gray-300 hover:border-gray-900"
                             }`}
                           >
                             {task.completed && (
@@ -357,24 +489,24 @@ export default function Home() {
                           </button>
 
                           {/* Left accent bar */}
-                          <div className={`w-0.5 h-5 rounded-full ${task.completed ? "bg-slate-200" : "bg-slate-300"}`} />
+                          <div className={`w-0.5 h-5 rounded-full ${task.completed ? "bg-gray-200" : "bg-gray-900"}`} />
 
                           {/* Text */}
                           <span className={`flex-1 text-[13px] transition-all duration-200 ${
-                            task.completed ? "line-through text-slate-400" : "text-slate-700"
+                            task.completed ? "line-through text-gray-400" : "text-gray-800"
                           }`}>
                             {task.text}
                           </span>
 
                           {/* Time */}
-                          <span className="text-[10px] text-slate-400 hidden sm:block tabular-nums">
+                          <span className="text-[10px] text-gray-400 hidden sm:block tabular-nums">
                             {getTimeAgo(task.createdAt)}
                           </span>
 
                           {/* Delete */}
                           <button
                             onClick={() => deleteTask(task.id)}
-                            className="w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-all duration-200 text-xs"
+                            className="w-6 h-6 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-900 hover:bg-gray-100 transition-all duration-200 text-xs"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -394,15 +526,15 @@ export default function Home() {
             <div className="p-4 max-h-[400px] overflow-y-auto">
               {/* Month nav */}
               <div className="flex items-center justify-between mb-4">
-                <button onClick={prevMonth} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-700 transition text-sm font-medium">
+                <button onClick={prevMonth} className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 hover:text-gray-900 transition text-sm font-medium">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                   </svg>
                 </button>
-                <h3 className="text-sm font-bold text-slate-700 tracking-wide">
+                <h3 className="text-sm font-bold text-gray-800 tracking-wide">
                   {MONTHS[calMonth]} {calYear}
                 </h3>
-                <button onClick={nextMonth} className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-700 transition text-sm font-medium">
+                <button onClick={nextMonth} className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 hover:text-gray-900 transition text-sm font-medium">
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                   </svg>
@@ -412,7 +544,7 @@ export default function Home() {
               {/* Day headers */}
               <div className="grid grid-cols-7 gap-1.5 mb-2">
                 {DAYS.map((d) => (
-                  <div key={d} className="text-center text-[10px] text-slate-400 font-semibold py-1 uppercase">
+                  <div key={d} className="text-center text-[10px] text-gray-400 font-semibold py-1 uppercase">
                     {d}
                   </div>
                 ))}
@@ -434,22 +566,22 @@ export default function Home() {
                       onClick={() => handleDayClick(day)}
                       className={`relative aspect-square rounded-xl flex flex-col items-center justify-center transition-all duration-150 text-xs font-medium ${
                         isSelected
-                          ? "bg-slate-800 text-white shadow-md scale-105"
+                          ? "bg-gray-900 text-white shadow-md scale-105"
                           : isToday
-                          ? "bg-slate-100 text-slate-800 ring-1 ring-slate-300 font-bold"
+                          ? "bg-gray-100 text-gray-900 ring-1 ring-gray-300 font-bold"
                           : hasTasks
-                          ? "bg-slate-50 text-slate-700 hover:bg-slate-100"
-                          : "text-slate-400 hover:bg-slate-50 hover:text-slate-600"
+                          ? "bg-gray-50 text-gray-700 hover:bg-gray-100"
+                          : "text-gray-400 hover:bg-gray-50 hover:text-gray-600"
                       }`}
                     >
                       <span>{day}</span>
                       {hasTasks && (
                         <div className="flex gap-0.5 mt-0.5">
                           {counts.active > 0 && (
-                            <div className={`w-1 h-1 rounded-full ${isSelected ? "bg-white/80" : "bg-amber-500"}`} />
+                            <div className={`w-1 h-1 rounded-full ${isSelected ? "bg-white/80" : "bg-gray-900"}`} />
                           )}
                           {counts.completed > 0 && (
-                            <div className={`w-1 h-1 rounded-full ${isSelected ? "bg-white/50" : "bg-emerald-500"}`} />
+                            <div className={`w-1 h-1 rounded-full ${isSelected ? "bg-white/50" : "bg-gray-400"}`} />
                           )}
                         </div>
                       )}
@@ -461,37 +593,37 @@ export default function Home() {
               {/* Selected date detail */}
               {selectedDate && (
                 <div className="mt-4">
-                  <div className="h-px bg-slate-100 mb-3" />
+                  <div className="h-px bg-gray-100 mb-3" />
                   <div className="flex items-center gap-2 mb-2 px-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-slate-800" />
-                    <h4 className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">
+                    <div className="w-1.5 h-1.5 rounded-full bg-gray-900" />
+                    <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-widest">
                       {formatDateLabel(selectedDate)}
                     </h4>
                     <div className="flex-1" />
-                    <span className="text-[10px] text-slate-400 font-medium">
+                    <span className="text-[10px] text-gray-400 font-medium">
                       {selectedDateTasks.length} {selectedDateTasks.length === 1 ? "task" : "tasks"}
                     </span>
                   </div>
 
                   {selectedDateTasks.length === 0 ? (
                     <div className="text-center py-5">
-                      <p className="text-slate-400 text-xs">No tasks on this day</p>
+                      <p className="text-gray-400 text-xs">No tasks on this day</p>
                     </div>
                   ) : (
                     <div className="space-y-1">
                       {selectedDateTasks.map((task) => (
                         <div
                           key={task.id}
-                          className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 hover:bg-slate-50 ${
-                            task.completed ? "opacity-50" : ""
+                          className={`group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 hover:bg-gray-50 ${
+                            task.completed ? "opacity-40" : ""
                           }`}
                         >
                           <button
                             onClick={() => toggleTask(task.id)}
                             className={`w-4 h-4 rounded-md border-2 flex items-center justify-center shrink-0 transition-all duration-200 ${
                               task.completed
-                                ? "bg-slate-800 border-slate-800"
-                                : "border-slate-300 hover:border-slate-500"
+                                ? "bg-gray-900 border-gray-900"
+                                : "border-gray-300 hover:border-gray-900"
                             }`}
                           >
                             {task.completed && (
@@ -500,15 +632,15 @@ export default function Home() {
                               </svg>
                             )}
                           </button>
-                          <span className={`flex-1 text-xs ${task.completed ? "line-through text-slate-400" : "text-slate-600"}`}>
+                          <span className={`flex-1 text-xs ${task.completed ? "line-through text-gray-400" : "text-gray-700"}`}>
                             {task.text}
                           </span>
-                          <span className="text-[10px] text-slate-400 tabular-nums">
+                          <span className="text-[10px] text-gray-400 tabular-nums">
                             {new Date(task.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                           </span>
                           <button
                             onClick={() => deleteTask(task.id)}
-                            className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-500 transition-all duration-200 text-xs"
+                            className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-gray-900 transition-all duration-200 text-xs"
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -526,21 +658,21 @@ export default function Home() {
           {/* ── Footer ────────────────────────────────────────────────── */}
           {tasks.length > 0 && (
             <>
-              <div className="h-px bg-slate-100" />
+              <div className="h-px bg-gray-100" />
               <div className="px-5 py-3 flex items-center gap-3">
-                <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-slate-700 to-slate-500 rounded-full transition-all duration-700"
+                    className="h-full bg-gray-900 rounded-full transition-all duration-700"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
-                <span className="text-[11px] text-slate-400 tabular-nums shrink-0 font-medium">
+                <span className="text-[11px] text-gray-400 tabular-nums shrink-0 font-medium">
                   {completedCount}/{tasks.length}
                 </span>
                 {completedCount > 0 && (
                   <button
                     onClick={() => setTasks((prev) => prev.filter((t) => !t.completed))}
-                    className="text-[11px] text-slate-400 hover:text-rose-500 transition shrink-0 font-medium"
+                    className="text-[11px] text-gray-400 hover:text-gray-900 transition shrink-0 font-medium"
                   >
                     Clear
                   </button>
@@ -551,5 +683,44 @@ export default function Home() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Root: Auth Gate ─────────────────────────────────────────────────────────
+
+export default function Home() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <AuthPage onAuth={() => {}} />;
+  }
+
+  return (
+    <TodoApp
+      userEmail={session.user.email ?? ""}
+      onLogout={async () => { await supabase.auth.signOut(); }}
+    />
   );
 }
