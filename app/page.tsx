@@ -4,6 +4,39 @@ import { useState, useMemo, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 
+// ─── Google Calendar Helper ─────────────────────────────────────────────────
+
+async function addToGoogleCalendar(accessToken: string, taskText: string, dueDate: string | null): Promise<boolean> {
+  try {
+    let body;
+    if (dueDate) {
+      // All-day event on the due date
+      const nextDay = new Date(dueDate + "T00:00:00");
+      nextDay.setDate(nextDay.getDate() + 1);
+      const endDate = `${nextDay.getFullYear()}-${String(nextDay.getMonth() + 1).padStart(2, "0")}-${String(nextDay.getDate()).padStart(2, "0")}`;
+      body = { summary: taskText, start: { date: dueDate }, end: { date: endDate } };
+    } else {
+      const now = new Date();
+      const end = new Date(now.getTime() + 60 * 60 * 1000);
+      body = { summary: taskText, start: { dateTime: now.toISOString() }, end: { dateTime: end.toISOString() } };
+    }
+
+    const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      console.error("Google Calendar error:", await res.text());
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("Google Calendar fetch error:", err);
+    return false;
+  }
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type Filter = "all" | "active" | "completed";
@@ -14,6 +47,7 @@ interface Task {
   text: string;
   completed: boolean;
   createdAt: number;
+  dueDate: string | null; // "YYYY-MM-DD" or null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -153,6 +187,38 @@ function AuthPage() {
                   {loading === "signup" ? "Creating..." : "Sign Up"}
                 </button>
               </div>
+
+              {/* Divider */}
+              <div className="flex items-center gap-3 pt-2">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">or</span>
+                <div className="flex-1 h-px bg-gray-200" />
+              </div>
+
+              {/* Google Sign In */}
+              <button
+                type="button"
+                onClick={async () => {
+                  setError("");
+                  const { error } = await supabase.auth.signInWithOAuth({
+                    provider: "google",
+                    options: {
+                      redirectTo: window.location.origin,
+                      scopes: "https://www.googleapis.com/auth/calendar.events",
+                    },
+                  });
+                  if (error) setError(error.message);
+                }}
+                className="w-full flex items-center justify-center gap-2 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-700 text-sm font-semibold py-3 rounded-xl transition-all active:scale-[0.98]"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24">
+                  <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4" />
+                  <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
+                  <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
+                  <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
+                </svg>
+                Sign in with Google
+              </button>
             </form>
 
             {error && (
@@ -167,7 +233,7 @@ function AuthPage() {
 
 // ─── Todo App ────────────────────────────────────────────────────────────────
 
-function TodoApp({ onLogout, userEmail, userId }: { onLogout: () => void; userEmail: string; userId: string }) {
+function TodoApp({ onLogout, userEmail, userId, googleToken }: { onLogout: () => void; userEmail: string; userId: string; googleToken: string | null }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [input, setInput] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -186,7 +252,7 @@ function TodoApp({ onLogout, userEmail, userId }: { onLogout: () => void; userEm
       .order("created_at", { ascending: false })
       .then(({ data }) => {
         if (data) {
-          setTasks(data.map((r) => ({ id: r.id, text: r.text, completed: r.completed, createdAt: r.created_at })));
+          setTasks(data.map((r) => ({ id: r.id, text: r.text, completed: r.completed, createdAt: r.created_at, dueDate: r.due_date ?? null })));
         }
       });
   }, []);
@@ -206,7 +272,7 @@ function TodoApp({ onLogout, userEmail, userId }: { onLogout: () => void; userEm
   const tasksByDate = useMemo(() => {
     const map: Record<string, Task[]> = {};
     for (const t of filteredTasks) {
-      const key = toDateKey(t.createdAt);
+      const key = t.dueDate || toDateKey(t.createdAt);
       if (!map[key]) map[key] = [];
       map[key].push(t);
     }
@@ -220,7 +286,7 @@ function TodoApp({ onLogout, userEmail, userId }: { onLogout: () => void; userEm
 
   const selectedDateTasks = useMemo(() => {
     if (!selectedDate) return [];
-    return filteredTasks.filter((t) => toDateKey(t.createdAt) === selectedDate);
+    return filteredTasks.filter((t) => (t.dueDate || toDateKey(t.createdAt)) === selectedDate);
   }, [filteredTasks, selectedDate]);
 
   const calendarDays = useMemo(() => {
@@ -235,7 +301,7 @@ function TodoApp({ onLogout, userEmail, userId }: { onLogout: () => void; userEm
   const taskCountByDay = useMemo(() => {
     const counts: Record<number, { total: number; active: number; completed: number }> = {};
     for (const t of tasks) {
-      const d = new Date(t.createdAt);
+      const d = t.dueDate ? new Date(t.dueDate + "T00:00:00") : new Date(t.createdAt);
       if (d.getFullYear() === calYear && d.getMonth() === calMonth) {
         const day = d.getDate();
         if (!counts[day]) counts[day] = { total: 0, active: 0, completed: 0 };
@@ -251,11 +317,18 @@ function TodoApp({ onLogout, userEmail, userId }: { onLogout: () => void; userEm
 
   async function addTask() {
     if (!input.trim()) return;
-    const newTask: Task = { id: Date.now(), text: input.trim(), completed: false, createdAt: Date.now() };
+    const taskDueDate = selectedDate || null;
+    const newTask: Task = { id: Date.now(), text: input.trim(), completed: false, createdAt: Date.now(), dueDate: taskDueDate };
     setTasks((prev) => [newTask, ...prev]);
     setInput("");
-    const { error } = await supabase.from("tasks").insert({ id: newTask.id, user_id: userId, text: newTask.text, completed: false, created_at: newTask.createdAt });
+    const { error } = await supabase.from("tasks").insert({ id: newTask.id, user_id: userId, text: newTask.text, completed: false, created_at: newTask.createdAt, due_date: taskDueDate });
     if (error) console.error("Insert task error:", error);
+
+    // Sync to Google Calendar if signed in with Google
+    if (googleToken) {
+      const synced = await addToGoogleCalendar(googleToken, newTask.text, taskDueDate);
+      if (synced) console.log("Synced to Google Calendar:", newTask.text);
+    }
   }
 
   async function toggleTask(id: number) {
@@ -693,15 +766,44 @@ function TodoApp({ onLogout, userEmail, userId }: { onLogout: () => void; userEm
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [googleToken, setGoogleToken] = useState<string | null>(null);
 
   useEffect(() => {
+    // Check URL hash for provider_token (Google sends it back in the redirect URL)
+    if (typeof window !== "undefined" && window.location.hash) {
+      const params = new URLSearchParams(window.location.hash.substring(1));
+      const providerToken = params.get("provider_token");
+      if (providerToken) {
+        setGoogleToken(providerToken);
+        localStorage.setItem("google_provider_token", providerToken);
+        console.log("Google token captured from URL hash");
+      }
+    }
+
+    // Also check localStorage for previously saved token
+    const savedToken = localStorage.getItem("google_provider_token");
+    if (savedToken) setGoogleToken(savedToken);
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      if (session?.provider_token) {
+        setGoogleToken(session.provider_token);
+        localStorage.setItem("google_provider_token", session.provider_token);
+        console.log("Google token captured from getSession");
+      }
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log("Auth event:", _event);
+      console.log("Session provider_token:", session?.provider_token ? "EXISTS" : "NULL");
+      console.log("Session provider_refresh_token:", session?.provider_refresh_token ? "EXISTS" : "NULL");
       setSession(session);
+      if (session?.provider_token) {
+        setGoogleToken(session.provider_token);
+        localStorage.setItem("google_provider_token", session.provider_token);
+        console.log("Google token SAVED");
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -723,7 +825,8 @@ export default function Home() {
     <TodoApp
       userId={session.user.id}
       userEmail={session.user.email ?? ""}
-      onLogout={async () => { await supabase.auth.signOut(); }}
+      googleToken={googleToken}
+      onLogout={async () => { setGoogleToken(null); localStorage.removeItem("google_provider_token"); await supabase.auth.signOut(); }}
     />
   );
 }
