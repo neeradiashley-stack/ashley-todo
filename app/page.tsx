@@ -6,10 +6,15 @@ import type { Session } from "@supabase/supabase-js";
 
 // ─── Google Calendar Helper ─────────────────────────────────────────────────
 
-async function addToGoogleCalendar(accessToken: string, taskText: string, dueDate: string | null): Promise<boolean> {
+async function addToGoogleCalendar(accessToken: string, taskText: string, dueDate: string | null, dueTime: string | null): Promise<boolean> {
   try {
     let body;
-    if (dueDate) {
+    if (dueDate && dueTime) {
+      // Timed event on the due date at the specified time
+      const start = new Date(`${dueDate}T${dueTime}:00`);
+      const end = new Date(start.getTime() + 60 * 60 * 1000); // 1 hour duration
+      body = { summary: taskText, start: { dateTime: start.toISOString() }, end: { dateTime: end.toISOString() } };
+    } else if (dueDate) {
       // All-day event on the due date
       const nextDay = new Date(dueDate + "T00:00:00");
       nextDay.setDate(nextDay.getDate() + 1);
@@ -48,6 +53,7 @@ interface Task {
   completed: boolean;
   createdAt: number;
   dueDate: string | null; // "YYYY-MM-DD" or null
+  dueTime: string | null; // "HH:MM" or null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -243,6 +249,7 @@ function TodoApp({ onLogout, userEmail, userId, googleToken }: { onLogout: () =>
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [dueTime, setDueTime] = useState("");
 
   // ─── Load tasks from Supabase ──────────────────────────────────────────
   useEffect(() => {
@@ -252,7 +259,7 @@ function TodoApp({ onLogout, userEmail, userId, googleToken }: { onLogout: () =>
       .order("created_at", { ascending: false })
       .then(({ data }) => {
         if (data) {
-          setTasks(data.map((r) => ({ id: r.id, text: r.text, completed: r.completed, createdAt: r.created_at, dueDate: r.due_date ?? null })));
+          setTasks(data.map((r) => ({ id: r.id, text: r.text, completed: r.completed, createdAt: r.created_at, dueDate: r.due_date ?? null, dueTime: r.due_time ?? null })));
         }
       });
   }, []);
@@ -318,15 +325,17 @@ function TodoApp({ onLogout, userEmail, userId, googleToken }: { onLogout: () =>
   async function addTask() {
     if (!input.trim()) return;
     const taskDueDate = selectedDate || null;
-    const newTask: Task = { id: Date.now(), text: input.trim(), completed: false, createdAt: Date.now(), dueDate: taskDueDate };
+    const taskDueTime = dueTime || null;
+    const newTask: Task = { id: Date.now(), text: input.trim(), completed: false, createdAt: Date.now(), dueDate: taskDueDate, dueTime: taskDueTime };
     setTasks((prev) => [newTask, ...prev]);
     setInput("");
-    const { error } = await supabase.from("tasks").insert({ id: newTask.id, user_id: userId, text: newTask.text, completed: false, created_at: newTask.createdAt, due_date: taskDueDate });
+    setDueTime("");
+    const { error } = await supabase.from("tasks").insert({ id: newTask.id, user_id: userId, text: newTask.text, completed: false, created_at: newTask.createdAt, due_date: taskDueDate, due_time: taskDueTime });
     if (error) console.error("Insert task error:", error);
 
     // Sync to Google Calendar if signed in with Google
     if (googleToken) {
-      const synced = await addToGoogleCalendar(googleToken, newTask.text, taskDueDate);
+      const synced = await addToGoogleCalendar(googleToken, newTask.text, taskDueDate, taskDueTime);
       if (synced) console.log("Synced to Google Calendar:", newTask.text);
     }
   }
@@ -445,6 +454,12 @@ function TodoApp({ onLogout, userEmail, userId, googleToken }: { onLogout: () =>
                 onKeyDown={(e) => e.key === "Enter" && addTask()}
                 placeholder="Add a new task..."
                 className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400 transition"
+              />
+              <input
+                type="time"
+                value={dueTime}
+                onChange={(e) => setDueTime(e.target.value)}
+                className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-3 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-400 transition w-[100px]"
               />
               <button
                 onClick={addTask}
@@ -571,7 +586,7 @@ function TodoApp({ onLogout, userEmail, userId, googleToken }: { onLogout: () =>
 
                           {/* Time */}
                           <span className="text-[10px] text-gray-400 hidden sm:block tabular-nums">
-                            {getTimeAgo(task.createdAt)}
+                            {task.dueTime || getTimeAgo(task.createdAt)}
                           </span>
 
                           {/* Delete */}
