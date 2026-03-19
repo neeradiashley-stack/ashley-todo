@@ -86,6 +86,13 @@ function getFirstDayOfMonth(year: number, month: number): number {
   return new Date(year, month, 1).getDay();
 }
 
+function formatTime12h(time: string): string {
+  const [h, m] = time.split(":").map(Number);
+  const ampm = h >= 12 ? "PM" : "AM";
+  const hour = h % 12 || 12;
+  return `${hour}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
 function getTimeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
   if (seconds < 60) return "just now";
@@ -585,8 +592,8 @@ function TodoApp({ onLogout, userEmail, userId, googleToken }: { onLogout: () =>
                           </span>
 
                           {/* Time */}
-                          <span className="text-[10px] text-gray-400 hidden sm:block tabular-nums">
-                            {task.dueTime || getTimeAgo(task.createdAt)}
+                          <span className="text-[10px] text-gray-400 tabular-nums">
+                            {task.dueTime ? formatTime12h(task.dueTime) : getTimeAgo(task.createdAt)}
                           </span>
 
                           {/* Delete */}
